@@ -2,22 +2,11 @@
  * @file        leo8_cpu.c
  * @brief       Emulator for the LEO-8 processor core.
  *
- * The CPU repeatedly performs the classic fetch-decode-execute cycle:
- *
- *   1. Fetch a 16-bit instruction from program memory.
- *   2. Increase the program counter.
- *   3. Decode opcode, function and register fields.
- *   4. Execute the selected operation.
- *
- * The implementation is intentionally direct. Each switch case corresponds
- * closely to logic that can later be implemented in VHDL.
- * 
  * @author      Michael Weilguni
- * @date        2026-07-14
+ * @date        2026-07-18
  *
  * @copyright   MIT License
  ******************************************************************************/
-
 #include "leo8_platform.h"
 #include "leo8_cpu.h"
 #include "leo8_isa.h"
@@ -27,14 +16,60 @@
 #include <string.h>
 
 /******************************************************************************
+ * Data bus helpers
+ ******************************************************************************/
+static uint8_t readData(Leo8Cpu *cpu, uint8_t address)
+{
+    switch (address)
+    {
+        case LEO8_IO_INPUT:
+            return leo8ReadInput();
+
+        case LEO8_IO_RANDOM:
+            return leo8ReadRandom();
+
+        case LEO8_IO_OUTPUT:
+            /* The output register is write-only. */
+            return 0u;
+
+        default:
+            if (address >= 0xF0u)
+            {
+                /* Unused I/O addresses read as zero. */
+                return 0u;
+            }
+
+            return cpu->ram[address];
+    }
+}
+
+static void writeData(Leo8Cpu *cpu, uint8_t address, uint8_t value,
+                      uint8_t sourceReg)
+{
+    switch (address)
+    {
+        case LEO8_IO_OUTPUT:
+            leo8WriteOutput(sourceReg, value);
+            break;
+
+        case LEO8_IO_INPUT:
+        case LEO8_IO_RANDOM:
+            /* Read-only registers ignore writes. */
+            break;
+
+        default:
+            if (address < 0xF0u)
+            {
+                cpu->ram[address] = value;
+            }
+            /* Writes to unused I/O addresses are ignored. */
+            break;
+    }
+}
+
+/******************************************************************************
  * Stack helpers
  ******************************************************************************/
-
-/**
- * @brief Push one byte onto the descending stack.
- *
- * The current stack address is written first; afterwards SP is decremented.
- */
 static int pushByte(Leo8Cpu *cpu, uint8_t value)
 {
     if (cpu->sp == 0u)
@@ -48,11 +83,6 @@ static int pushByte(Leo8Cpu *cpu, uint8_t value)
     return 0;
 }
 
-/**
- * @brief Pop one byte from the descending stack.
- *
- * This operation reverses pushByte(): SP is incremented before reading.
- */
 static int popByte(Leo8Cpu *cpu, uint8_t *value)
 {
     if (cpu->sp == LEO8_STACK_TOP)
@@ -66,32 +96,21 @@ static int popByte(Leo8Cpu *cpu, uint8_t *value)
     return 0;
 }
 
-/******************************************************************************
- * Flag and debug helpers
- ******************************************************************************/
-
-/** Set Z when an 8-bit result is zero. */
 static void updateZeroFlag(Leo8Cpu *cpu, uint8_t value)
 {
     cpu->flagZ = (value == 0u);
 }
 
-/** Print the CPU state after one executed instruction. */
 static void printTrace(const Leo8Cpu *cpu, uint16_t pc, uint16_t instruction)
 {
-    printf("PC=%04X IR=%04X  R0=%02X R1=%02X R2=%02X R3=%02X  Z=%u C=%u SP=%02X\n",
-           pc, instruction,
-           cpu->r[0], cpu->r[1], cpu->r[2], cpu->r[3],
+    printf("PC=%04X IR=%04X R0=%02X R1=%02X R2=%02X R3=%02X "
+           "Z=%u C=%u SP=%02X\n",
+           pc, instruction, cpu->r[0], cpu->r[1], cpu->r[2], cpu->r[3],
            cpu->flagZ, cpu->flagC, cpu->sp);
 }
 
-/******************************************************************************
- * Public CPU functions
- ******************************************************************************/
-
 void leo8CpuReset(Leo8Cpu *cpu)
 {
-    /* Program memory is deliberately not cleared: it has already been loaded. */
     memset(cpu->r, 0, sizeof(cpu->r));
     memset(cpu->ram, 0, sizeof(cpu->ram));
     cpu->pc = 0u;
@@ -112,8 +131,8 @@ int leo8CpuLoadHex(Leo8Cpu *cpu, const char *filename)
         return -1;
     }
 
-    /* One line in the HEX file represents one 16-bit program word. */
     cpu->programSize = 0u;
+
     while (fscanf(file, "%x", &value) == 1)
     {
         if ((cpu->programSize >= LEO8_PROGRAM_SIZE) || (value > 0xFFFFu))
@@ -142,39 +161,16 @@ int leo8CpuStep(Leo8Cpu *cpu, int trace)
         return -1;
     }
 
-    /**************************************************************************
-     * Fetch
-     **************************************************************************/
-
     currentPc = cpu->pc;
     instruction = cpu->program[cpu->pc++];
-
-    /**************************************************************************
-     * Decode
-     *
-     * Bits 15..12 contain the main opcode for every instruction format.
-     **************************************************************************/
-
     opcode = (uint8_t)(instruction >> 12);
-
-    /**************************************************************************
-     * Execute
-     **************************************************************************/
 
     switch (opcode)
     {
         case LEO8_OP_SYSTEM:
         {
-            /*
-             * SYSTEM format:
-             *
-             *  15          12 11          8 7        6 5              0
-             * +--------------+--------------+----------+----------------+
-             * | SYSTEM = 0   |   function   | register |    unused      |
-             * +--------------+--------------+----------+----------------+
-             */
-            uint8_t function = (uint8_t) ((instruction >> 8) & 0x0Fu);
-            uint8_t reg = (uint8_t) ((instruction >> 6) & 0x03u);
+            uint8_t function = (uint8_t)((instruction >> 8) & 0x0Fu);
+            uint8_t reg = (uint8_t)((instruction >> 6) & 0x03u);
             uint8_t low;
             uint8_t high;
 
@@ -188,7 +184,6 @@ int leo8CpuStep(Leo8Cpu *cpu, int trace)
                     break;
 
                 case LEO8_SYS_RET:
-                    /* CALL stores high byte first and low byte second. */
                     if ((popByte(cpu, &low) != 0) ||
                         (popByte(cpu, &high) != 0))
                     {
@@ -196,15 +191,16 @@ int leo8CpuStep(Leo8Cpu *cpu, int trace)
                     }
                     cpu->pc = (uint16_t)(((uint16_t)high << 8) | low);
                     break;
-                
-                case LEO8_SYS_IN:
-                    cpu->r[reg] = leo8ReadInput();
-                    cpu->flagZ = (cpu->r[reg] == 0);
 
+                case LEO8_SYS_IN:
+                    /* Legacy alias for reading address LEO8_IO_INPUT. */
+                    cpu->r[reg] = readData(cpu, LEO8_IO_INPUT);
+                    updateZeroFlag(cpu, cpu->r[reg]);
                     break;
-                
+
                 case LEO8_SYS_OUT:
-                    leo8WriteOutput(reg, cpu->r[reg]);
+                    /* Legacy alias for writing address LEO8_IO_OUTPUT. */
+                    writeData(cpu, LEO8_IO_OUTPUT, cpu->r[reg], reg);
                     break;
 
                 case LEO8_SYS_PUSH:
@@ -222,7 +218,8 @@ int leo8CpuStep(Leo8Cpu *cpu, int trace)
                     break;
 
                 default:
-                    fprintf(stderr, "Unknown system instruction %04X\n", instruction);
+                    fprintf(stderr, "Unknown system instruction %04X\n",
+                            instruction);
                     return -1;
             }
             break;
@@ -230,7 +227,6 @@ int leo8CpuStep(Leo8Cpu *cpu, int trace)
 
         case LEO8_OP_LDI:
         {
-            /* LDI stores an 8-bit constant directly in the instruction word. */
             uint8_t rd = (uint8_t)((instruction >> 10) & 0x03u);
             cpu->r[rd] = (uint8_t)(instruction & 0x00FFu);
             updateZeroFlag(cpu, cpu->r[rd]);
@@ -248,17 +244,6 @@ int leo8CpuStep(Leo8Cpu *cpu, int trace)
 
         case LEO8_OP_ALU:
         {
-            /*
-             * ALU format:
-             *
-             *  15          12 11          8 7     6 5     4 3        0
-             * +--------------+--------------+-------+-------+----------+
-             * |   ALU = 3    |   function   |  Rd   |  Rs   | unused   |
-             * +--------------+--------------+-------+-------+----------+
-             *
-             * Most operations use Rd both as input and destination:
-             *     Rd = Rd operation Rs
-             */
             uint8_t function = (uint8_t)((instruction >> 8) & 0x0Fu);
             uint8_t rd = (uint8_t)((instruction >> 6) & 0x03u);
             uint8_t rs = (uint8_t)((instruction >> 4) & 0x03u);
@@ -275,7 +260,6 @@ int leo8CpuStep(Leo8Cpu *cpu, int trace)
                     break;
 
                 case LEO8_ALU_ADC:
-                    /* The previous carry is saved before the flag is updated. */
                     carryIn = cpu->flagC;
                     result = (uint16_t)cpu->r[rd] + cpu->r[rs] + carryIn;
                     cpu->r[rd] = (uint8_t)result;
@@ -284,14 +268,12 @@ int leo8CpuStep(Leo8Cpu *cpu, int trace)
                     break;
 
                 case LEO8_ALU_SUB:
-                    /* C=1 means no borrow; this simplifies multi-byte SBC. */
                     cpu->flagC = (cpu->r[rd] >= cpu->r[rs]);
                     cpu->r[rd] = (uint8_t)(cpu->r[rd] - cpu->r[rs]);
                     updateZeroFlag(cpu, cpu->r[rd]);
                     break;
 
                 case LEO8_ALU_SBC:
-                    /* Borrow is represented by C=0 and subtracted as one. */
                     carryIn = cpu->flagC;
                     result = (uint16_t)cpu->r[rs] + (carryIn ? 0u : 1u);
                     cpu->flagC = ((uint16_t)cpu->r[rd] >= result);
@@ -315,14 +297,14 @@ int leo8CpuStep(Leo8Cpu *cpu, int trace)
                     break;
 
                 case LEO8_ALU_CMP:
-                    /* CMP updates flags like SUB but discards the result. */
                     result = (uint16_t)cpu->r[rd] - cpu->r[rs];
                     cpu->flagZ = ((uint8_t)result == 0u);
                     cpu->flagC = (cpu->r[rd] >= cpu->r[rs]);
                     break;
 
                 default:
-                    fprintf(stderr, "Unknown ALU instruction %04X\n", instruction);
+                    fprintf(stderr, "Unknown ALU instruction %04X\n",
+                            instruction);
                     return -1;
             }
             break;
@@ -330,25 +312,24 @@ int leo8CpuStep(Leo8Cpu *cpu, int trace)
 
         case LEO8_OP_LD:
         {
-            /* The second register contains the 8-bit RAM address. */
             uint8_t rd = (uint8_t)((instruction >> 10) & 0x03u);
             uint8_t addressReg = (uint8_t)((instruction >> 8) & 0x03u);
-            cpu->r[rd] = cpu->ram[cpu->r[addressReg]];
+
+            cpu->r[rd] = readData(cpu, cpu->r[addressReg]);
             updateZeroFlag(cpu, cpu->r[rd]);
             break;
         }
 
         case LEO8_OP_ST:
         {
-            /* The first register contains the RAM address. */
             uint8_t addressReg = (uint8_t)((instruction >> 10) & 0x03u);
             uint8_t rs = (uint8_t)((instruction >> 8) & 0x03u);
-            cpu->ram[cpu->r[addressReg]] = cpu->r[rs];
+
+            writeData(cpu, cpu->r[addressReg], cpu->r[rs], rs);
             break;
         }
 
         case LEO8_OP_JMP:
-            /* JMP stores an absolute 12-bit program address. */
             cpu->pc = (uint16_t)(instruction & 0x0FFFu);
             break;
 
@@ -356,10 +337,6 @@ int leo8CpuStep(Leo8Cpu *cpu, int trace)
         {
             uint16_t returnAddress = cpu->pc;
 
-            /*
-             * PC already points to the next instruction after fetch. This is
-             * exactly the address RET must restore later.
-             */
             if ((pushByte(cpu, (uint8_t)(returnAddress >> 8)) != 0) ||
                 (pushByte(cpu, (uint8_t)returnAddress) != 0))
             {
@@ -373,20 +350,22 @@ int leo8CpuStep(Leo8Cpu *cpu, int trace)
         case LEO8_OP_BEQ:
             if (cpu->flagZ != 0u)
             {
-                /* Branch offsets are relative to the already incremented PC. */
-                cpu->pc = (uint16_t)(cpu->pc + (int8_t)(instruction & 0x00FFu));
+                cpu->pc = (uint16_t)(cpu->pc +
+                                     (int8_t)(instruction & 0x00FFu));
             }
             break;
 
         case LEO8_OP_BNE:
             if (cpu->flagZ == 0u)
             {
-                cpu->pc = (uint16_t)(cpu->pc + (int8_t)(instruction & 0x00FFu));
+                cpu->pc = (uint16_t)(cpu->pc +
+                                     (int8_t)(instruction & 0x00FFu));
             }
             break;
 
         default:
-            fprintf(stderr, "Unknown opcode %X at address %04X\n", opcode, currentPc);
+            fprintf(stderr, "Unknown opcode %X at address %04X\n",
+                    opcode, currentPc);
             return -1;
     }
 
@@ -405,7 +384,6 @@ int leo8CpuRun(Leo8Cpu *cpu, int trace)
 
     while (cpu->halted == 0u)
     {
-        /* Prevent an accidental endless loop from locking the emulator. */
         if (steps++ >= maxSteps)
         {
             fprintf(stderr, "Execution stopped after %lu steps\n", maxSteps);
