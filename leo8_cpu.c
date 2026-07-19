@@ -103,8 +103,8 @@ static void updateZeroFlag(Leo8Cpu *cpu, uint8_t value)
 
 static void printTrace(const Leo8Cpu *cpu, uint16_t pc, uint16_t instruction)
 {
-    printf("PC=%04X IR=%04X R0=%02X R1=%02X R2=%02X R3=%02X "
-           "Z=%u C=%u SP=%02X\n",
+    printf("PC=0x%04X IR=0x%04X R0=0x%02X R1=0x%02X R2=0x%02X R3=0x%02X "
+           "Z=%u C=%u SP=0x%02X\n",
            pc, instruction, cpu->r[0], cpu->r[1], cpu->r[2], cpu->r[3],
            cpu->flagZ, cpu->flagC, cpu->sp);
 }
