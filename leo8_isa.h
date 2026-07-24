@@ -33,8 +33,7 @@ typedef enum
     LEO8_OP_ST     = 0x5,
     LEO8_OP_JMP    = 0x6,
     LEO8_OP_CALL   = 0x7,
-    LEO8_OP_BEQ    = 0x8,
-    LEO8_OP_BNE    = 0x9
+    LEO8_OP_BRANCH = 0x9
 } Leo8Opcode;
 
 /******************************************************************************
@@ -67,7 +66,22 @@ typedef enum
     LEO8_ALU_AND = 0x4,
     LEO8_ALU_OR  = 0x5,
     LEO8_ALU_XOR = 0x6,
-    LEO8_ALU_CMP = 0x7
+    LEO8_ALU_CMP = 0x7,
+    LEO8_ALU_SHL = 0x8,
+    LEO8_ALU_SHR = 0x9
 } Leo8AluFunction;
+
+/******************************************************************************
+ * BRANCH instruction functions
+ ******************************************************************************/
+
+ /* BRANCH condition in bits 11..10 */
+typedef enum
+{
+    LEO8_BRANCH_BEQ = 0x0,
+    LEO8_BRANCH_BNE = 0x1,
+    LEO8_BRANCH_BCS = 0x2,
+    LEO8_BRANCH_BCC = 0x3
+} Leo8BranchFunction;
 
 #endif

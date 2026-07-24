@@ -1,8 +1,8 @@
-# LEO-8
+# LEO8
 
 A minimal 8-bit processor for learning computer architecture.
 
-LEO-8 is a small educational processor designed for students who already know basic digital logic and the C programming language. Its purpose is not to imitate a modern CPU, but to make every important concept of a processor understandable.
+LEO8 is a small educational processor designed for students who already know basic digital logic and the C programming language. Its purpose is not to imitate a modern CPU, but to make every important concept of a processor understandable.
 
 The complete processor—including the assembler and emulator—can be studied in a relatively small amount of source code.
 
@@ -10,7 +10,7 @@ The complete processor—including the assembler and emulator—can be studied i
 
 # Design Goals
 
-LEO-8 was developed with the following goals in mind:
+LEO8 was developed with the following goals in mind:
 
 * Simple and readable instruction set
 * Small C implementation
@@ -55,6 +55,8 @@ The same assembly program can later be executed by both the C emulator and a har
 * `AND`
 * `OR`
 * `XOR`
+* `SHL`
+* `SHR`
 * `CMP`
 
 ## Program flow
@@ -62,6 +64,8 @@ The same assembly program can later be executed by both the C emulator and a har
 * `JMP`
 * `BEQ`
 * `BNE`
+* `BCS`
+* `BCC`
 * `CALL`
 * `RET`
 
@@ -89,7 +93,7 @@ main.c
     Command-line frontend
 
 leo8_cpu.c / .h
-    LEO-8 processor implementation
+    LEO8 processor implementation
 
 leo8_assembler.c / .h
     Two-pass assembler
@@ -135,20 +139,20 @@ before including the standard C library or add it as a project preprocessor defi
 Assemble and execute an assembly program:
 
 ```bash
-leo8 countdown.asm
+leo8 add8.asm
 ```
 
 Enable instruction tracing:
 
 ```bash
-leo8 countdown.asm --trace
+leo8 add8.asm --trace
 ```
 
 The assembler automatically generates
 
 ```text
-countdown.hex
-countdown.lst
+add8.hex
+add8.lst
 ```
 
 before the emulator starts.
@@ -183,7 +187,7 @@ Assembly source (.asm)
  Machine code (.hex)
           │
           ▼
-     LEO-8 Emulator
+     LEO8 Emulator
           │
           ▼
    Program execution
@@ -195,7 +199,7 @@ The generated HEX file can later be used as the program memory for a VHDL implem
 
 # Educational Philosophy
 
-LEO-8 is intentionally small.
+LEO8 is intentionally small.
 
 The goal is not to reproduce a commercial processor, but to help students understand how processors work.
 
@@ -213,7 +217,7 @@ Processor
 Digital Hardware (VHDL)
 ```
 
-This makes LEO-8 a bridge between software engineering and digital logic design.
+This makes LEO8 a bridge between software engineering and digital logic design.
 
 ---
 

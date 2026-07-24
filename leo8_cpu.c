@@ -302,6 +302,20 @@ int leo8CpuStep(Leo8Cpu *cpu, int trace)
                     cpu->flagC = (cpu->r[rd] >= cpu->r[rs]);
                     break;
 
+                case LEO8_ALU_SHL:
+                    /* Shift bit 7 into Carry and insert zero at bit 0. */
+                    cpu->flagC = (uint8_t)((cpu->r[rd] >> 7) & 0x01u);
+                    cpu->r[rd] = (uint8_t)(cpu->r[rd] << 1);
+                    updateZeroFlag(cpu, cpu->r[rd]);
+                    break;
+
+                case LEO8_ALU_SHR:
+                    /* Shift bit 0 into Carry and insert zero at bit 7. */
+                    cpu->flagC = (uint8_t)(cpu->r[rd] & 0x01u);
+                    cpu->r[rd] = (uint8_t)(cpu->r[rd] >> 1);
+                    updateZeroFlag(cpu, cpu->r[rd]);
+                    break;
+
                 default:
                     fprintf(stderr, "Unknown ALU instruction %04X\n",
                             instruction);
@@ -330,8 +344,11 @@ int leo8CpuStep(Leo8Cpu *cpu, int trace)
         }
 
         case LEO8_OP_JMP:
+        {
+            /* absolute jump using lower 12 bits */
             cpu->pc = (uint16_t)(instruction & 0x0FFFu);
             break;
+        }
 
         case LEO8_OP_CALL:
         {
@@ -347,22 +364,53 @@ int leo8CpuStep(Leo8Cpu *cpu, int trace)
             break;
         }
 
-        case LEO8_OP_BEQ:
-            if (cpu->flagZ != 0u)
-            {
-                cpu->pc = (uint16_t)(cpu->pc +
-                                     (int8_t)(instruction & 0x00FFu));
-            }
-            break;
+        case LEO8_OP_BRANCH:
 
-        case LEO8_OP_BNE:
-            if (cpu->flagZ == 0u)
-            {
-                cpu->pc = (uint16_t)(cpu->pc +
-                                     (int8_t)(instruction & 0x00FFu));
-            }
-            break;
+        {
+            uint8_t condition = (uint8_t)((instruction >> 10) & 0x03u);
+            int16_t offset = (int16_t)(instruction & 0x03FFu);
 
+            /* Sign-extend the 10-bit relative offset to 16 bits. */
+            if ((offset & 0x0200) != 0)
+            {
+                offset |= (int16_t)0xFC00;
+            }
+
+            /* Conditional branch with a signed 10-bit offset. */
+
+            switch (condition)
+            {
+            case LEO8_BRANCH_BEQ:
+                if (cpu->flagZ == 1u)
+                {
+                    cpu->pc = (uint16_t) (cpu->pc + offset);
+                }
+                break;
+            case LEO8_BRANCH_BNE:
+                if (cpu->flagZ != 1u)
+                {
+                    cpu->pc = (uint16_t) (cpu->pc + offset);
+                }
+                break;
+            case LEO8_BRANCH_BCS:
+                if (cpu->flagC == 1u)
+                {
+                    cpu->pc = (uint16_t) (cpu->pc + offset);
+                }
+                break;
+            case LEO8_BRANCH_BCC:
+                if (cpu->flagC != 1u)
+                {
+                    cpu->pc = (uint16_t) (cpu->pc + offset);
+                }
+                break;
+            default:
+                fprintf(stderr, "Unknown BRANCH instruction %04X\n", condition);
+                return -1;
+            }
+
+            break;
+        }
         default:
             fprintf(stderr, "Unknown opcode %X at address %04X\n",
                     opcode, currentPc);

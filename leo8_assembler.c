@@ -136,16 +136,14 @@ static int addSymbol(SymbolTable *table, const char *name, uint16_t value)
         }
     }
 
-    snprintf(table->symbols[table->count].name,
-             sizeof(table->symbols[table->count].name), "%s", name);
+    snprintf(table->symbols[table->count].name, sizeof(table->symbols[table->count].name), "%s", name);
     table->symbols[table->count].value = value;
     table->count++;
 
     return 0;
 }
 
-static int findSymbol(const SymbolTable *table, const char *name,
-                      uint16_t *value)
+static int findSymbol(const SymbolTable *table, const char *name, uint16_t *value)
 {
     size_t i;
 
@@ -214,8 +212,7 @@ static int parseNumber(const char *token, long *value)
     return 0;
 }
 
-static int resolveValue(const SymbolTable *symbols, const char *token,
-                        uint16_t *value)
+static int resolveValue(const SymbolTable *symbols, const char *token, uint16_t *value)
 {
     char name[LEO8_MAX_TOKEN];
     long number;
@@ -241,8 +238,7 @@ static int resolveValue(const SymbolTable *symbols, const char *token,
     return findSymbol(symbols, name, value);
 }
 
-static int resolveAddress(const SymbolTable *symbols, const char *token,
-                          uint16_t *address)
+static int resolveAddress(const SymbolTable *symbols, const char *token, uint16_t *address)
 {
     uint16_t value;
 
@@ -256,8 +252,7 @@ static int resolveAddress(const SymbolTable *symbols, const char *token,
     return 0;
 }
 
-static int parseEquDirective(const char *source, char *name, size_t nameSize,
-                             long *value)
+static int parseEquDirective(const char *source, char *name, size_t nameSize, long *value)
 {
     char line[LEO8_MAX_LINE];
     char first[LEO8_MAX_TOKEN];
@@ -294,9 +289,7 @@ static int parseEquDirective(const char *source, char *name, size_t nameSize,
     return 1;
 }
 
-static int splitOperands(char *text,
-                         char operands[][LEO8_MAX_TOKEN],
-                         int maxOperands)
+static int splitOperands(char *text, char operands[][LEO8_MAX_TOKEN], int maxOperands)
 {
     int count = 0;
     char *token = strtok(text, ",");
@@ -338,6 +331,11 @@ static uint16_t encodeAlu(uint8_t function, uint8_t rd, uint8_t rs)
                       ((uint16_t)function << 8) |
                       ((uint16_t)rd << 6) |
                       ((uint16_t)rs << 4));
+}
+
+static uint16_t encodeBranch(uint8_t condition, int16_t offset)
+{
+    return (uint16_t) ((LEO8_OP_BRANCH << 12) | ((condition & 0x03) << 10) | ((uint16_t) offset & 0x03FF));
 }
 
 /******************************************************************************
@@ -456,6 +454,27 @@ static int assembleInstruction(const char *source, uint16_t address,
         return 0;
     }
 
+    if ((strcmp(mnemonic, "SHL") == 0) ||
+        (strcmp(mnemonic, "SHR") == 0))
+    {
+        uint8_t function;
+
+        if ((operandCount != 1) ||
+            (parseRegister(operands[0], &r0) != 0))
+        {
+            snprintf(error, errorSize, "%s syntax: %s Rn",
+                     mnemonic, mnemonic);
+            return -1;
+        }
+
+        function = (strcmp(mnemonic, "SHL") == 0) ?
+                   LEO8_ALU_SHL : LEO8_ALU_SHR;
+
+        /* Rs is unused for unary shift instructions and encoded as zero. */
+        *word = encodeAlu(function, r0, 0u);
+        return 0;
+    }
+
     if ((strcmp(mnemonic, "ADD") == 0) ||
         (strcmp(mnemonic, "ADC") == 0) ||
         (strcmp(mnemonic, "SUB") == 0) ||
@@ -476,14 +495,14 @@ static int assembleInstruction(const char *source, uint16_t address,
             return -1;
         }
 
-        if (strcmp(mnemonic, "ADD") == 0) function = LEO8_ALU_ADD;
+        if      (strcmp(mnemonic, "ADD") == 0) function = LEO8_ALU_ADD;
         else if (strcmp(mnemonic, "ADC") == 0) function = LEO8_ALU_ADC;
         else if (strcmp(mnemonic, "SUB") == 0) function = LEO8_ALU_SUB;
         else if (strcmp(mnemonic, "SBC") == 0) function = LEO8_ALU_SBC;
         else if (strcmp(mnemonic, "AND") == 0) function = LEO8_ALU_AND;
-        else if (strcmp(mnemonic, "OR") == 0) function = LEO8_ALU_OR;
+        else if (strcmp(mnemonic, "OR") == 0)  function = LEO8_ALU_OR;
         else if (strcmp(mnemonic, "XOR") == 0) function = LEO8_ALU_XOR;
-        else function = LEO8_ALU_CMP;
+        else                                   function = LEO8_ALU_CMP;
 
         *word = encodeAlu(function, r0, r1);
         return 0;
@@ -537,29 +556,31 @@ static int assembleInstruction(const char *source, uint16_t address,
     }
 
     if ((strcmp(mnemonic, "BEQ") == 0) ||
-        (strcmp(mnemonic, "BNE") == 0))
+        (strcmp(mnemonic, "BNE") == 0) ||
+        (strcmp(mnemonic, "BCS") == 0) ||
+        (strcmp(mnemonic, "BCC") == 0))
     {
-        uint8_t opcode = (strcmp(mnemonic, "BEQ") == 0) ?
-                         LEO8_OP_BEQ : LEO8_OP_BNE;
-
+        uint8_t condition;
+        if      (strcmp(mnemonic, "BEQ") == 0)   condition = LEO8_BRANCH_BEQ;
+        else if (strcmp(mnemonic, "BNE") == 0)   condition = LEO8_BRANCH_BNE;
+        else if (strcmp(mnemonic, "BCS") == 0)   condition = LEO8_BRANCH_BCS;
+        else                                     condition = LEO8_BRANCH_BCC;
+        
         if ((operandCount != 1) ||
             (resolveAddress(symbols, operands[0], &target) != 0))
         {
-            snprintf(error, errorSize,
-                     "%s requires a valid label or address", mnemonic);
+            snprintf(error, errorSize, "%s requires a valid label or address", mnemonic);
             return -1;
         }
 
         offset = (int32_t)target - ((int32_t)address + 1);
-        if ((offset < -128) || (offset > 127))
+        if ((offset < -512) || (offset > 511))
         {
-            snprintf(error, errorSize,
-                     "%s target is outside the relative range", mnemonic);
+            snprintf(error, errorSize, "%s target is outside the relative range", mnemonic);
             return -1;
         }
 
-        *word = (uint16_t)(((uint16_t)opcode << 12) |
-                           (uint8_t)offset);
+        *word = encodeBranch(condition, offset);
         return 0;
     }
 
@@ -710,7 +731,9 @@ static void formatListingSource(const char *source, uint16_t address,
     if ((strcmp(mnemonic, "JMP") == 0) ||
         (strcmp(mnemonic, "CALL") == 0) ||
         (strcmp(mnemonic, "BEQ") == 0) ||
-        (strcmp(mnemonic, "BNE") == 0))
+        (strcmp(mnemonic, "BNE") == 0) ||
+        (strcmp(mnemonic, "BCS") == 0) ||
+        (strcmp(mnemonic, "BCC") == 0))
     {
         if (resolveAddress(symbols, operand, &value) == 0)
         {
@@ -721,7 +744,9 @@ static void formatListingSource(const char *source, uint16_t address,
                 snprintf(output, outputSize, "%s %04X", mnemonic, value);
             }
             else if ((strcmp(mnemonic, "BEQ") == 0) ||
-                     (strcmp(mnemonic, "BNE") == 0))
+                     (strcmp(mnemonic, "BNE") == 0) ||
+                     (strcmp(mnemonic, "BCS") == 0) ||
+                     (strcmp(mnemonic, "BCC") == 0))
             {
                 int32_t offset = (int32_t)value - ((int32_t)address + 1);
                 snprintf(output, outputSize,
