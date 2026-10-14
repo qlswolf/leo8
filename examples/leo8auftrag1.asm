@@ -1,0 +1,5 @@
+LDI R0, 7
+LDI R1, 3
+MOV R2, R0
+MOV R3, R1
+HALT

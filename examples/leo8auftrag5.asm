@@ -1,0 +1,12 @@
+; 1.
+LDI R0, 15
+LDI R1, 7
+ADD R0, R1
+
+; 2.
+LDI R0, 0x64
+LDI R1, 0x25
+SUB R0, R1
+
+; 3.
+LDI 
